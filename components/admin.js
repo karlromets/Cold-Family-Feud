@@ -369,7 +369,6 @@ export default function Admin(props) {
   let ws = props.ws;
   let game = props.game;
   let refreshCounter = 0;
-  let pongInterval;
 
   function setError(e) {
     setErrorVal(e);
@@ -392,7 +391,7 @@ export default function Admin(props) {
   }
 
   useEffect(() => {
-    setInterval(() => {
+    const retryInterval = setInterval(() => {
       if (ws.current.readyState !== 1) {
         setError(
           `lost connection to server refreshing in ${10 - refreshCounter}`,
@@ -405,12 +404,12 @@ export default function Admin(props) {
       }
     }, 1000);
 
-    pongInterval = setInterval(() => {
+    const pongInterval = setInterval(() => {
       console.debug("sending pong in admin");
       send({ action: "pong" });
     }, 5000);
 
-    ws.current.addEventListener("message", (evt) => {
+    const handleMessage = (evt) => {
       var received_msg = evt.data;
       let json = JSON.parse(received_msg);
       if (json.action === "data") {
@@ -431,10 +430,16 @@ export default function Admin(props) {
       } else {
         console.debug("did not expect admin: ", json);
       }
-    });
+    }
+
+    ws.current.addEventListener("message", handleMessage);
     send({ action: "change_lang", data: i18n.language });
-    return () => clearInterval(pongInterval);
-  }, []);
+    return () => {
+      clearInterval(pongInterval);
+      clearInterval(retryInterval);
+      ws.current.removeEventListener("message", handleMessage);
+    };
+  }, [i18n.language]);
 
   if (game.teams != null) {
     let current_screen;
