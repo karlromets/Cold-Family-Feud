@@ -4,30 +4,49 @@ import { useTranslation } from "react-i18next";
 import "i18n/i18n";
 import LanguageSwitcher from "components/language";
 import { ThemeSwitcher } from "components/Admin/settings";
+import { Game } from "@/types/game";
 
 export default function CreateGame(props) {
   const { t } = useTranslation();
-  let gameTemplate = {
-    settings: {},
-    rounds: [
-      {
-        question: "",
-        answers: [{ ans: "", pnt: 0 }],
-        multiply: 1,
-      },
-    ],
-    final_round: Array.from(Array(5), (x, index) => {
-      return {
-        question: `${t("question")} ${t("number", { count: index + 1 })}`,
-        answers: [],
-      };
-    }),
+  let gameTemplate: Game = {
+    settings: {
+      logo_url: null,
+      hide_questions: false,
+      theme: "light",
+      final_round_title: null
+    },
+    rounds: [{
+      question: "",
+      answers: [{ ans: "", pnt: 0, trig: false }],
+      multiply: 1,
+    }],
+    final_round: Array.from(Array(5), (x, index) => ({
+      question: `${t("question")} ${t("number", { count: index + 1 })}`,
+      answers: [],
+      selection: 0,
+      input: "",
+      revealed: false
+    })),
     final_round_timers: [20, 25],
+    registeredPlayers: {},
+    buzzed: [],
+    final_round_2: [],
+    gameCopy: [],
+    teams: [],
+    title: false,
+    title_text: "",
+    point_tracker: [],
+    is_final_round: false,
+    is_final_second: false,
+    hide_first_round: false,
+    round: 0,
+    room: "",
+    tick: 0
   };
   const [error, setError] = useState("");
-  const [game, setGame] = useState(gameTemplate);
-  const [theme, setTheme] = useState({
-    settings: {}
+  const [game, setGame] = useState<Game>(gameTemplate);
+  const [theme, setTheme] = useState<{ settings: { theme?: string } }>({
+    settings: { theme: "default" }
   });
 
   console.debug(game);
@@ -44,9 +63,9 @@ export default function CreateGame(props) {
   };
 
   if (typeof window !== "undefined") {
-    document.body.className= game?.settings?.theme + " bg-background";
+    document.body.className = game?.settings?.theme + " bg-background";
     // Prevent losing changes
-    window.onbeforeunload = function() {
+    window.onbeforeunload = function () {
       return "";
     };
   }
@@ -75,12 +94,12 @@ export default function CreateGame(props) {
                 <button
                   className="hover:shadow-md rounded-md p-2 bg-primary-200"
                   onClick={() => {
-                    var file = document.getElementById("gamePicker").files[0];
+                    const file = (document.getElementById("gamePicker") as HTMLInputElement).files[0];
                     if (file) {
                       var reader = new FileReader();
                       reader.readAsText(file, "utf-8");
-                      reader.onload = function(evt) {
-                        let data = JSON.parse(evt.target.result);
+                      reader.onload = function (evt) {
+                        let data = JSON.parse(evt.target.result as string);
                         console.debug(data);
 
                         data.final_round == null
@@ -98,7 +117,7 @@ export default function CreateGame(props) {
                           : null;
                         setGame(data);
                       };
-                      reader.onerror = function(evt) {
+                      reader.onerror = function (evt) {
                         console.error("error reading file");
                       };
                     }
@@ -183,7 +202,7 @@ export default function CreateGame(props) {
                 <div className="py-2 flex flex-row space-x-3">
                   <button
                     onClick={() => {
-                      r.answers.push({ ans: "", pnt: 0});
+                      r.answers.push({ ans: "", pnt: 0, trig: false });
                       setGame((prv) => ({ ...prv }));
                     }}
                     className="hover:shadow-md rounded-md bg-success-200 px-3 py-1 text-md"
@@ -207,7 +226,7 @@ export default function CreateGame(props) {
                 onClick={() => {
                   game.rounds.push({
                     question: "",
-                    answers: [{ ans: "", pnt: 0}],
+                    answers: [{ ans: "", pnt: 0, trig: false }],
                     multiply: 1,
                   });
                   setGame((prv) => ({ ...prv }));
@@ -303,7 +322,7 @@ export default function CreateGame(props) {
                   ))}
                   <button
                     onClick={() => {
-                      q.answers.push(["", ""]);
+                      q.answers.push(["", 0]);
                       setGame((prv) => ({ ...prv }));
                     }}
                     className="hover:shadow-md rounded-md bg-success-200 px-3 py-1 text-md"
@@ -332,6 +351,9 @@ export default function CreateGame(props) {
                       count: game.final_round.length + 1,
                     })}`,
                     answers: [],
+                    selection: 0,
+                    input: "",
+                    revealed: false
                   });
                   setGame((prv) => ({ ...prv }));
                 }}
@@ -370,7 +392,6 @@ export default function CreateGame(props) {
                   );
                 }
                 if (
-                  r.multiply === "" ||
                   r.multiply === 0 ||
                   isNaN(r.multiply)
                 ) {
@@ -399,7 +420,7 @@ export default function CreateGame(props) {
                       )
                     );
                   }
-                  if (a.pnt === 0 || a.pnt === "" || isNaN(a.pnt)) {
+                  if (a.pnt === 0 || isNaN(a.pnt)) {
                     error.push(
                       t(
                         "round item {{count, number}} has {{zero, number}} points answer number {{answernum, number}}",

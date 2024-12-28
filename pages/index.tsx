@@ -2,13 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import Head from "next/head";
 import "tailwindcss/tailwind.css";
 import { useTranslation } from "react-i18next";
-import "i18n/i18n";
-import Admin from "components/admin";
-import Buzzer from "components/buzzer";
-import Login from "components/login";
-import Footer from "components/Login/footer"
+import "@/i18n/i18n";
+import Admin from "@/components/admin";
+import Buzzer from "@/components/buzzer";
+import Login from "@/components/login";
+import Footer from "@/components/Login/footer"
 import cookieCutter from "cookie-cutter";
 import { ERROR_CODES } from "i18n/errorCodes";
+import { Game } from "@/types/game";
+import { ErrorMessage, GetBackInMessage, GetBackInResponse, HostRoomResponse, JoinRoomResponse, QuitMessage, WebSocketAction, WebSocketMessage, WebSocketResponse } from "@/types/websocket";
 
 export default function Home() {
   const { t } = useTranslation();
@@ -17,13 +19,27 @@ export default function Home() {
   const [error, setErrorVal] = useState("");
   const [registeredRoomCode, setRegisteredRoomCode] = useState(null);
   const [host, setHost] = useState(false);
-  const [game, setGame] = useState(null);
+  const [game, setGame] = useState<Game | null>(null);
   const [team, setTeam] = useState(null);
   const [playerID, setPlayerID] = useState(null);
 
-  const ws = useRef(null);
+  const ws = useRef<WebSocket | null>(null);
 
-  function setError(e) {
+  const isResponseType = <T extends WebSocketResponse>(
+    message: Partial<WebSocketResponse>,
+    action: WebSocketAction
+  ): message is T => {
+    return message.action === action;
+  };
+
+  const isMessageType = <T extends WebSocketMessage>(
+    message: Partial<WebSocketMessage>,
+    action: WebSocketAction
+  ): message is T => {
+    return message.action === action;
+  };
+
+  function setError(e: string) {
     setErrorVal(e);
     setTimeout(() => {
       setErrorVal("");
@@ -63,14 +79,14 @@ export default function Home() {
           ws.current.onmessage = function(evt) {
             var received_msg = evt.data;
             let json = JSON.parse(received_msg);
-            if (json.action === "host_room") {
+            if (isResponseType<HostRoomResponse>(message, "host_room")) {
               console.debug("registering room with host", json.room);
               setPlayerID(json.id);
               setHost(true);
               setRegisteredRoomCode(json.room);
               setGame(json.game);
               cookieCutter.set("session", `${json.room}:${json.id}`);
-            } else if (json.action === "join_room") {
+            } else if (isResponseType<JoinRoomResponse>(message, "join_room")) {
               console.debug("Joining room : ", json);
               setPlayerID(json.id);
               setRegisteredRoomCode(json.room);
@@ -78,14 +94,14 @@ export default function Home() {
               if (json.team != null) {
                 setTeam(json.team);
               }
-            } else if (json.action === "quit") {
+            } else if (isMessageType<QuitMessage>(message, "quit")) {
               console.debug("player quit");
               setPlayerID(null);
               setRegisteredRoomCode(null);
               cookieCutter.set("session", "");
-              setGame({});
+              setGame(null);
               setHost(false);
-            } else if (json.action === "get_back_in") {
+            } else if (isResponseType<GetBackInResponse>(message, "get_back_in")) {
               console.debug("Getting back into room", json);
               if (json.player === "host") {
                 setHost(true);
@@ -96,7 +112,7 @@ export default function Home() {
               setPlayerID(json.id);
               setRegisteredRoomCode(json.room);
               setGame(json.game);
-            } else if (json.action === "error") {
+            } else if (isMessageType<ErrorMessage>(message, "error")) {
               console.error(json.code);
               setError(t(json.code, { message: json.message }));
             } else {
@@ -104,7 +120,7 @@ export default function Home() {
             }
           };
 
-          ws.current.onerror = function(e) {
+          ws.current.onerror = function(e: Event) {
             console.error(e);
           };
 
@@ -145,9 +161,9 @@ export default function Home() {
   function joinRoom() {
     console.debug(`ws.current `, ws);
     setError("");
-    let roomcode = document.getElementById("roomcode").value;
+    let roomcode = (document.getElementById("roomcode") as HTMLInputElement).value;
     if (roomcode.length === 4) {
-      let playername = document.getElementById("playername").value;
+      let playername = (document.getElementById("playername") as HTMLInputElement).value;
       if (playername.length > 0) {
         console.debug(`roomcode: ${roomcode}, playername ${playername}`);
         send(

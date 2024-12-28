@@ -8,12 +8,36 @@ import Final from "components/final";
 import "tailwindcss/tailwind.css";
 import cookieCutter from "cookie-cutter";
 import { ERROR_CODES } from "i18n/errorCodes";
+import type { Game } from "@/types/game";
+import type {
+  WebSocketMessage,
+  DataMessage,
+  QuitMessage,
+  ChangeLanguageMessage,
+  MistakeMessage,
+  RevealMessage,
+  FinalRevealMessage,
+  DuplicateMessage,
+  FinalSubmitMessage,
+  FinalWrongMessage,
+  SetTimerMessage,
+  StopTimerMessage,
+  StartTimerMessage,
+  TimerCompleteMessage,
+  ClearBuzzersMessage,
+  WebSocketAction
+} from "@/types/websocket";
 
-let timerInterval = null;
+// Generic type guard function
+function isMessageType<T extends WebSocketMessage>(message: WebSocketMessage, action: WebSocketAction): message is T {
+  return message.action === action;
+}
+
+let timerInterval: NodeJS.Timeout | null = null;
 
 export default function Game(props) {
   const { i18n, t } = useTranslation();
-  const [game, setGame] = useState({});
+  const [game, setGame] = useState<Game | null>(null);
   const [timer, setTimer] = useState(0);
   const [error, setErrorVal] = useState("");
   const [showMistake, setShowMistake] = useState(false);
@@ -21,7 +45,7 @@ export default function Game(props) {
   const ws = useRef(null);
   let refreshCounter = 0;
 
-  function setError(e) {
+  function setError(e: string) {
     setErrorVal(e);
     setTimeout(() => {
       setErrorVal("");
@@ -31,7 +55,7 @@ export default function Game(props) {
   useEffect(() => {
     fetch("/api/ws").finally(() => {
       ws.current = new WebSocket(`wss://${window.location.host}/api/ws`);
-      ws.current.onopen = function() {
+      ws.current.onopen = function () {
         console.log("game connected to server");
         let session = cookieCutter.get("session");
         console.debug(session);
@@ -50,11 +74,12 @@ export default function Game(props) {
         }
       };
 
-      ws.current.onmessage = function(evt) {
-        var received_msg = evt.data;
-        let json = JSON.parse(received_msg);
+      ws.current.onmessage = function (evt) {
+        const received_msg = evt.data;
+        const json = JSON.parse(received_msg) as WebSocketMessage;
         console.debug(json);
-        if (json.action === "data") {
+
+        if (isMessageType<DataMessage>(json, "data")) {
           if (json.data.title_text === "Change Me") {
             json.data.title_text = t("Change Me");
           }
@@ -69,86 +94,83 @@ export default function Game(props) {
             })}`;
           }
           setGame(json.data);
-          let session = cookieCutter.get("session");
-          let [_, id] = session.split(":");
-          if (json.data?.registeredPlayers[id] == "host") {
+          const session = cookieCutter.get("session");
+          const [_, id] = session.split(":");
+          if (json.data?.registeredPlayers[id] === "host") {
             setIsHost(true);
           }
-        } else if (
-          json.action === "mistake" ||
-          json.action === "show_mistake"
-        ) {
-          var audio = new Audio("wrong.mp3");
+        } else if (isMessageType<MistakeMessage>(json, "mistake") || isMessageType<MistakeMessage>(json, "show_mistake")) {
+          const audio = new Audio("wrong.mp3");
           audio.play();
           setShowMistake(true);
           setTimeout(() => {
             setShowMistake(false);
           }, 2000);
-        } else if (json.action === "quit") {
-          setGame({});
+        } else if (isMessageType<QuitMessage>(json, "quit")) {
+          setGame(null);
           window.close();
-        } else if (json.action === "reveal") {
-          var audio = new Audio("good-answer.mp3");
+        } else if (isMessageType<RevealMessage>(json, "reveal")) {
+          const audio = new Audio("good-answer.mp3");
           audio.play();
-        } else if (json.action === "final_reveal") {
-          var audio = new Audio("fm-answer-reveal.mp3");
+        } else if (isMessageType<FinalRevealMessage>(json, "final_reveal")) {
+          const audio = new Audio("fm-answer-reveal.mp3");
           audio.play();
-        } else if (json.action === "duplicate") {
-          var audio = new Audio("duplicate.mp3");
+        } else if (isMessageType<DuplicateMessage>(json, "duplicate")) {
+          const audio = new Audio("duplicate.mp3");
           audio.play();
-        } else if (json.action === "final_submit") {
-          var audio = new Audio("good-answer.mp3");
+        } else if (isMessageType<FinalSubmitMessage>(json, "final_submit")) {
+          const audio = new Audio("good-answer.mp3");
           audio.play();
-        } else if (json.action === "final_wrong") {
-          var audio = new Audio("try-again.mp3");
+        } else if (isMessageType<FinalWrongMessage>(json, "final_wrong")) {
+          const audio = new Audio("try-again.mp3");
           audio.play();
-        } else if (json.action === "set_timer") {
+        } else if (isMessageType<SetTimerMessage>(json, "set_timer")) {
           setTimer(json.data);
-        } else if (json.action === "stop_timer") {
-          clearInterval(timerInterval);
-        } else if (json.action === "start_timer") {
+        } else if (isMessageType<StopTimerMessage>(json, "stop_timer")) {
+          if (timerInterval) clearInterval(timerInterval);
+        } else if (isMessageType<StartTimerMessage>(json, "start_timer")) {
           timerInterval = setInterval(() => {
-          setTimer(prevTimer => {
-            if (prevTimer > 0) {
-              return prevTimer - 1;
-            } else {
-              var audio = new Audio("try-again.mp3");
-              audio.play();
-              clearInterval(timerInterval);
+            setTimer(prevTimer => {
+              if (prevTimer > 0) {
+                return prevTimer - 1;
+              } else {
+                const audio = new Audio("try-again.mp3");
+                audio.play();
+                if (timerInterval) clearInterval(timerInterval);
 
-              // Send timer stop to admin.js
-              try {
-                let session = cookieCutter.get("session");
-                let [room, id] = session.split(":");
+                // Send timer stop to admin.js
+                try {
+                  const session = cookieCutter.get("session");
+                  const [room, id] = session.split(":");
 
-                if(!session) {
-                  console.error("No session cookie found");
-                  return 0;
+                  if (!session) {
+                    console.error("No session cookie found");
+                    return 0;
+                  }
+
+                  if (!room || !id) {
+                    console.error("Invalid session cookie format");
+                    return 0;
+                  }
+
+                  ws.current.send(JSON.stringify({
+                    action: "timer_complete",
+                    room: room,
+                    id: id
+                  }));
+                } catch (error) {
+                  console.error("Error processing session cookie:", error);
                 }
-
-                if(!room || !id) {
-                  console.error("Invalid session cookie format");
-                  return 0;
-                }
-
-                ws.current.send(JSON.stringify({
-                  action: "timer_complete",
-                  room: room,
-                  id: id
-                }));
-              } catch (error) {
-                console.error("Error processing session cookie:", error);
+                return 0;
               }
-              return 0;
-            }
-          });
+            });
           }, 1000);
-        } else if (json.action === "change_lang") {
+        } else if (isMessageType<ChangeLanguageMessage>(json, "change_lang")) {
           console.debug("Language Change", json.data);
           i18n.changeLanguage(json.data);
-        } else if (json.action === "timer_complete") {
+        } else if (isMessageType<TimerCompleteMessage>(json, "timer_complete")) {
           console.debug("Timer complete");
-        } else if (json.action === "clearbuzzers") {
+        } else if (isMessageType<ClearBuzzersMessage>(json, "clearbuzzers")) {
           console.debug("Clear buzzers");
         } else {
           console.error("didn't expect", json);
@@ -158,7 +180,7 @@ export default function Game(props) {
       setInterval(() => {
         if (ws.current.readyState !== 1) {
           setError(
-            t(ERROR_CODES.CONNECTION_LOST, {message: `${10 - refreshCounter}`}),
+            t(ERROR_CODES.CONNECTION_LOST, { message: `${10 - refreshCounter}` }),
           );
           refreshCounter++;
           if (refreshCounter >= 5) {
