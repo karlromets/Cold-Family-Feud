@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import "tailwindcss/tailwind.css";
 import { useTranslation } from "react-i18next";
 import "i18n/i18n";
@@ -6,8 +6,10 @@ import LanguageSwitcher from "components/language";
 import { ThemeSwitcher } from "components/Admin/settings";
 import { Game } from "@/types/game";
 
-export default function CreateGame(props) {
+export default function CreateGame() {
   const { t } = useTranslation();
+  const gamePickerRef = useRef<HTMLInputElement>(null);
+
   let gameTemplate: Game = {
     settings: {
       logo_url: null,
@@ -51,7 +53,7 @@ export default function CreateGame(props) {
 
   console.debug(game);
 
-  const downloadToFile = (content, filename, contentType) => {
+  const downloadToFile = (content: string, filename: string, contentType: string) => {
     const a = document.createElement("a");
     const file = new Blob([content], { type: contentType });
 
@@ -86,6 +88,7 @@ export default function CreateGame(props) {
             <div className="flex flex-col border-2  rounded-lg">
               <div className="p-2 ml-4 items-center transform translate-y-3">
                 <input
+                  ref={gamePickerRef}
                   type="file"
                   className=" bg-secondary-300 text-foreground"
                   id="gamePicker"
@@ -94,12 +97,12 @@ export default function CreateGame(props) {
                 <button
                   className="hover:shadow-md rounded-md p-2 bg-primary-200"
                   onClick={() => {
-                    const file = (document.getElementById("gamePicker") as HTMLInputElement).files[0];
+                    const file = gamePickerRef.current?.files?.[0];
                     if (file) {
                       var reader = new FileReader();
                       reader.readAsText(file, "utf-8");
                       reader.onload = function (evt) {
-                        let data = JSON.parse(evt.target.result as string);
+                        let data = JSON.parse(evt.target?.result as string);
                         console.debug(data);
 
                         data.final_round == null

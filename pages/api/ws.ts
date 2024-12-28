@@ -7,8 +7,9 @@ import {ERROR_CODES} from "i18n/errorCodes"
 import * as loadGame from "backend/load-game";
 import { Game, Player } from "@/types/game";
 import { NextApiResponse } from "next";
-import { BuzzMessage, ChangeLanguageMessage, ClearBuzzersMessage, DataMessage, ErrorMessage, GameWindowMessage, HostRoomMessage, LoadGameMessage, LogoUploadMessage, PongMessage, RegisterBuzzMessage, RegisterPlayerMessage, RegisterSpectatorMessage, WebSocketAction, WebSocketMessage } from "@/types/websocket";
-import { Rooms } from "@/types/room";
+import { BuzzMessage, ChangeLanguageMessage, ClearBuzzersMessage, DataMessage, ErrorMessage, GameWindowMessage, HostRoomMessage, LoadGameMessage, LogoUploadMessage, PongMessage, RegisterBuzzMessage, RegisterPlayerMessage, RegisterSpectatorMessage, WebSocketAction, WebSocketMessage, GetBackInMessage, JoinRoomMessage, QuitMessage } from "@/types/websocket";
+import { Room, Rooms } from "@/types/room";
+import getErrorMessage from '@/utils/getErrorMessage';
 
 interface CustomWebSocketServer extends WebSocket.Server {
   broadcast: (room: string, data: any) => void;
@@ -39,7 +40,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
       return result.join("");
     }
 
-    const pingInterval = (room, id: number, ws: WebSocket) => {
+    const pingInterval = (room: Room, id: number, ws: WebSocket) => {
       // get recurring latency
       console.debug("Setting ping interval for player: ", id);
       let interval = setInterval(() => {
@@ -51,9 +52,11 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
             console.debug("Player disconnected, closing ping", id);
             clearInterval(interval);
           } else {
-            console.debug("Sending ping to id", id);
-            room.game.registeredPlayers[id].start = new Date();
-            ws.send(JSON.stringify({ action: "ping", id: id }));
+            if (room.game.registeredPlayers[id] !== "host") {
+              console.debug("Sending ping to id", id);
+              room.game.registeredPlayers[id].start = new Date();
+              ws.send(JSON.stringify({ action: "ping", id: id }));
+            }
           }
         } catch (e) {
           console.error("Player disconnected? ", e);
@@ -69,7 +72,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
     }
 
     // loop until we register the host with an id
-    const registerPlayer = (roomCode: string, host = false, message: RegisterPlayerMessage, ws) => {
+    const registerPlayer = (roomCode: string, host = false, message: RegisterPlayerMessage, ws: WebSocket) => {
       let id = uuidv4();
       let game = rooms[roomCode].game;
       while (!game.registeredPlayers[id]) {
@@ -100,7 +103,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
       }
     }
 
-    let average = (array) => array.reduce((a: number, b: number) => a + b) / array.length;
+    let average = (array: number[]) => array.reduce((a: number, b: number) => a + b) / array.length;
     // TODO instead of storing game data in memory, this should be stored to disk or redis
     let rooms: Rooms = {};
     let game = {
@@ -143,14 +146,14 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
       }
     };
 
-    const moreThanOneHourAgo = (date) => {
+    const moreThanOneHourAgo = (date: number) => {
       const HOUR = 1000 * 60 * 60;
       const anHourAgo = Date.now() - HOUR;
 
       return date < anHourAgo;
     };
 
-    const setTick = (message) => {
+    const setTick = (message: Partial<WebSocketMessage>) => {
       if (message.room) {
         if (rooms[message.room]) {
           if (rooms[message.room].game) {
@@ -168,7 +171,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
       for (const [room, roomData] of Object.entries(rooms)) {
         if (roomData.game?.tick) {
           if (roomData.game.tick) {
-            if (moreThanOneHourAgo(new Date(roomData.game.tick))) {
+            if (moreThanOneHourAgo(new Date(roomData.game.tick).getTime())) {
               console.debug("clearing room, no activity for 1 hour: ", room);
               wss.broadcast(room, JSON.stringify({ action: "data", data: {} }));
               wss.broadcast(
@@ -225,6 +228,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
 
           // TODO seperate each of these into seperate functions
           if (isMessageType<LoadGameMessage>(message, "load_game")) {
+            if (!message.room) return;
             if (message.file != null && message.lang != null) {
               let data = fs.readFileSync(
                 `games/${message.lang}/${message.file}`,
@@ -234,8 +238,10 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
             }
 
             let loadGameData = loadGame.addGameKeys(message.data);
+            const room = rooms[message.room];
+            if (!room) return;
 
-            let game: Game = rooms[message.room].game;
+            const game = room.game;
             game.teams[0].points = 0;
             game.teams[1].points = 0;
             game.round = 0;
@@ -258,12 +264,12 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               roomCode = makeRoom();
             }
 
-            // rooms[roomCode] = {};
-
-            rooms[roomCode].intervals = {};
-            rooms[roomCode].game = JSON.parse(JSON.stringify(game));
+            rooms[roomCode] = {
+              intervals: {},
+              game: JSON.parse(JSON.stringify(game)),
+              connections: {}
+            };
             rooms[roomCode].game.room = roomCode;
-            rooms[roomCode].connections = {};
 
             let id = registerPlayer(roomCode, true, { name: "" }, ws);
 
@@ -277,14 +283,15 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               }),
             );
           } else if (isMessageType<GameWindowMessage>(message, "game_window")) {
-            let [room_code, user_id] = message.session.split(":");
+            const [room_code, user_id] = message.session.split(":");
+            if (!room_code || !rooms[room_code]) return;
             rooms[room_code].connections[`game_window_${uuidv4()}`] = ws;
             wss.broadcast(
               room_code,
               JSON.stringify({ action: "data", data: rooms[room_code].game }),
             );
-          } else if (message.action === "join_room") {
-            let roomCode = message.room.toUpperCase();
+          } else if (isMessageType<JoinRoomMessage>(message, "join_room")) {
+            let roomCode = message.room?.toUpperCase() || "";
             console.debug("joining room", roomCode);
             if (rooms[roomCode]) {
               let id = registerPlayer(roomCode, false, message as RegisterPlayerMessage, ws);
@@ -301,14 +308,14 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
                 JSON.stringify({ action: "error", code: ERROR_CODES.ROOM_NOT_FOUND }),
               );
             }
-          } else if (message.action === "quit") {
+          } else if (isMessageType<QuitMessage>(message, "quit")) {
             console.debug(
               "user quit game",
               message.room,
               message.id,
               message.host,
             );
-            if (message.host) {
+            if (message.host && message.room) {
               wss.broadcast(message.room, JSON.stringify({ action: "quit" }));
               wss.broadcast(
                 message.room,
@@ -337,6 +344,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               delete rooms[message.room];
               cleanUpPublicRoomAssets(message.room);
             } else {
+              if(message.room && message.id) {
               let interval = rooms[message.room].intervals[message.id];
               console.debug("Clear interval =>", interval);
               if (interval) {
@@ -345,7 +353,7 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               let ws = rooms[message.room].connections[message.id];
               ws.send(JSON.stringify({ action: "quit" }));
               rooms[message.room].game.buzzed.forEach((b, index) => {
-                if (b.id === message.id) {
+                if (b.id === message.id && message.room) {
                   rooms[message.room].game.buzzed.splice(index, 1);
                 }
               });
@@ -360,7 +368,8 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
                 }),
               );
             }
-          } else if (message.action === "get_back_in") {
+          }
+          } else if (isMessageType<GetBackInMessage>(message, "get_back_in")) {
             let [room_code, user_id, team] = message.session.split(":");
             if (rooms[room_code]) {
               if (rooms[room_code].game.registeredPlayers[user_id]) {
@@ -390,70 +399,63 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
             }
           } else if (isMessageType<DataMessage>(message, "data")) {
             // copy off what the round used to be for comparison
-            let game = rooms[message.room].game;
-            let copy_round = game.round;
-            let copy_title = game.title;
-            delete message.data.registeredPlayers;
-            let clone = Object.assign(game, message.data);
-            game = clone;
-            if (
-              copy_round != message.data.round ||
-              copy_title != message.data.title
-            ) {
-              game.buzzed = [];
-              wss.broadcast(
-                message.room,
-                JSON.stringify({ action: "clearbuzzers" }),
-              );
+            if (!message.room || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
+            const copy_round = game.round;
+            const copy_title = game.title;
+            if (!message.data) return;
+            const { registeredPlayers, ...restData } = message.data;
+            const clone = Object.assign(game, restData);
+            if (copy_round !== message.data.round || copy_title !== message.data.title) {
+              clone.buzzed = [];
+              wss.broadcast(message.room, JSON.stringify({ action: "clearbuzzers" }));
             }
             // get the current time to compare when users buzz in
-            wss.broadcast(
-              message.room,
-              JSON.stringify({ action: "data", data: game }),
-            );
+            wss.broadcast(message.room, JSON.stringify({ action: "data", data: clone }));
           } else if (isMessageType<RegisterBuzzMessage>(message, "registerbuzz")) {
-            let id = message.id;
-            let game = rooms[message.room].game;
+            if (!message.room || !message.id || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
             try {
-              if(game.registeredPlayers[id] !== 'host') {
-                game.registeredPlayers[id].latencies = [];
-                game.registeredPlayers[id].team = message.team;
-                console.debug("buzzer ready: ", id);
-                // get inital latency, client pongs on registered
-                game.registeredPlayers[id].start = new Date();
+              const player = game.registeredPlayers[message.id];
+              if (player !== 'host' && typeof player === 'object') {
+                player.latencies = [];
+                player.team = message.team;
+                console.debug("buzzer ready: ", message.id);
+                player.start = new Date();
               }
-              ws.send(JSON.stringify({ action: "ping", id: id }));
-              ws.send(JSON.stringify({ action: "registered", id: id }));
-              wss.broadcast(
-                message.room,
-                JSON.stringify({ action: "data", data: game }),
-              );
-            } catch (e) {
-              console.error("Problem in buzzer register ", e);
+              ws.send(JSON.stringify({ action: "ping", id: message.id }));
+              ws.send(JSON.stringify({ action: "registered", id: message.id }));
+              wss.broadcast(message.room, JSON.stringify({ action: "data", data: game }));
+            } catch (error) {
+              let errorString = getErrorMessage(error);
+              console.error("Problem in buzzer register ", errorString);
             }
-            pingInterval(rooms[message.room], parseInt(id), ws);
+            pingInterval(rooms[message.room], parseInt(message.id), ws);
           } else if (isMessageType<RegisterSpectatorMessage>(message, "registerspectator")) {
-            let id = message.id;
-            let game = rooms[message.room].game;
+            if (!message.room || !message.id || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
             try {
-              console.debug("spectator ready: ", id);
+              console.debug("spectator ready: ", message.id);
               // get inital latency, client pongs on registered
-              ws.send(JSON.stringify({ action: "ping", id: id }));
-              ws.send(JSON.stringify({ action: "registered", id: id }));
-              wss.broadcast(
-                message.room,
-                JSON.stringify({ action: "data", data: game }),
-              );
-            } catch (e) {
-              console.error("Problem in spectator register ", e);
+              ws.send(JSON.stringify({ action: "ping", id: message.id }));
+              ws.send(JSON.stringify({ action: "registered", id: message.id }));
+              wss.broadcast(message.room, JSON.stringify({ action: "data", data: game }));
+            } catch (error) {
+              let errorString = getErrorMessage(error);
+              console.error("Problem in spectator register ", errorString);
             }
           } else if (isMessageType<PongMessage>(message, "pong")) {
-            let game = rooms[message.room].game;
-            let player = game.registeredPlayers[message.id];
-            if (player !== 'host') {
-              let end = new Date();
-              let start = player.start;
-              let latency = end.getTime() - start.getTime();
+            if (!message.room || !message.id || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
+            const player = game.registeredPlayers[message.id];
+            if (player !== 'host' && typeof player === 'object') {
+              const end = new Date();
+              if (!player.start || !player.latencies) {
+                player.start = new Date();
+                player.latencies = [];
+                return;
+              }
+              const latency = end.getTime() - player.start.getTime();
               while (player.latencies.length >= 5) {
                 player.latencies.shift();
               }
@@ -461,74 +463,68 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               player.latency = average(player.latencies);
             }
           } else if (isMessageType<ClearBuzzersMessage>(message, "clearbuzzers")) {
-            let game = rooms[message.room].game;
+            if (!message.room || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
             game.buzzed = [];
-            wss.broadcast(
-              message.room,
-              JSON.stringify({ action: "data", data: game }),
-            );
-            wss.broadcast(
-              message.room,
-              JSON.stringify({ action: "clearbuzzers" }),
-            );
+            const roomCode = message.room;
+            wss.broadcast(roomCode, JSON.stringify({ action: "data", data: game }));
+            wss.broadcast(roomCode, JSON.stringify({ action: "clearbuzzers" }));
           } else if (isMessageType<ChangeLanguageMessage>(message, "change_lang")) {
+            if (!message.room || !message.data) return;
+            const roomCode = message.room;
             glob(
               `**/*.json`,
               { cwd: `games/${message.data}/` },
-              function(err, files) {
+              function(err: Error | null, files: string[]) {
                 // files is an array of filenames.
                 // If the `nonull` option is set, and nothing
                 // was found, then files is ["**/*.js"]
                 // er is an error object or null.
                 if (err) {
                   console.error("change_lang error:", err);
+                  return;
                 }
-
-                var collator = new Intl.Collator(undefined, {
+                const collator = new Intl.Collator(undefined, {
                   numeric: true,
                   sensitivity: "base",
                 });
-                wss.broadcast(
-                  message.room,
-                  JSON.stringify({
-                    action: "change_lang",
-                    data: message.data,
-                    games: files.sort(collator.compare),
-                  }),
-                );
+                wss.broadcast(roomCode, JSON.stringify({
+                  action: "change_lang",
+                  data: message.data,
+                  games: files.sort(collator.compare),
+                }));
               },
             );
           } else if (isMessageType<BuzzMessage>(message, "buzz")) {
-            let game = rooms[message.room].game;
-            let time: number;
-            if(game.registeredPlayers[message.id] !== "host") {
+            if (!message.room || !message.id || !rooms[message.room]) return;
+            const game = rooms[message.room].game;
+            let time = 0;
+            if (game.registeredPlayers[message.id] !== "host") {
               const player = game.registeredPlayers[message.id] as Player;
-              time = new Date().getTime() - player.latency;
+              time = player.latency ? new Date().getTime() - player.latency : new Date().getTime();
             }
             if (game.buzzed.length === 0) {
-              game.buzzed.unshift({ id: message.id, time: time });
+              game.buzzed.unshift({ id: message.id, time });
             } else {
               for (let i = 0; i < game.buzzed.length; i++) {
                 const b = game.buzzed[i];
                 if (b.time < time) {
                   // saved buzzed was quicker than incoming buzz
                   if (i === game.buzzed.length - 1) {
-                    game.buzzed.push({ id: message.id, time: time });
+                    game.buzzed.push({ id: message.id, time });
                     break;
                   }
                 } else {
-                  game.buzzed.splice(i, 0, { id: message.id, time: time });
+                  game.buzzed.splice(i, 0, { id: message.id, time });
                   break;
                 }
               }
             }
             ws.send(JSON.stringify({ action: "buzzed" }));
-            wss.broadcast(
-              message.room,
-              JSON.stringify({ action: "data", data: game }),
-            );
+            wss.broadcast(message.room, JSON.stringify({ action: "data", data: game }));
           } else if (isMessageType<LogoUploadMessage>(message, "logo_upload")) {
-            let dirpath = `./public/rooms/${message.room}/`;
+            if (!message.room || !message.data || !message.mimetype) return;
+            const dirpath = `./public/rooms/${message.room}/`;
             try {
               const fileSize = Math.round(message.data.length / 1024);
               if (fileSize > 2098) {
@@ -549,17 +545,12 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               }
               switch (header) {
                 case "89504e47":
-                  // mimetype = "png";
-                  break;
                 case "47494638":
-                  // mimetype = "gif";
-                  break;
                 case "ffd8ffe0":
                 case "ffd8ffe1":
                 case "ffd8ffe2":
                 case "ffd8ffe3":
                 case "ffd8ffe8":
-                  // mimetype = "jpeg";
                   break;
                 default:
                   console.error("Unknown file type in image upload");
@@ -576,34 +567,37 @@ const ioHandler = (req: Request, res: ExtendedResponse) => {
               }
               fs.writeFile(
                 dirpath + `logo.${message.mimetype}`,
-                message.data, // edited
+                message.data,
                 "binary",
-                (err) => {
-                  if (err != null) {
+                (err: NodeJS.ErrnoException | null) => {
+                  if (err) {
                     console.error("Error saving logo file", err);
                   }
                 },
               );
-            } catch (e) {
-              console.error("Error in logo upload", e);
+            } catch (error) {
+              let errorString = getErrorMessage(error);
+              console.error("Error in logo upload", errorString);
             }
           } else if (isMessageType<LogoUploadMessage>(message, "del_logo_upload")) {
+            if (!message.room) return;
             cleanUpPublicRoomAssets(message.room);
           } else {
             // even if not specified we always expect an action
-            if (message.action) {
+            if (message.action && message.room) {
               wss.broadcast(message.room, JSON.stringify(message));
             } else {
               console.error("didnt expect this message server: ", message);
             }
           }
-        } catch (e) {
-          console.error("Error in processing socket message: ", e);
+        } catch (error) {
+          let errorString = getErrorMessage(error);
+          console.error("Error in processing socket message: ", errorString);
           ws.send(
             JSON.stringify({
               action: "error",
               code: ERROR_CODES.SERVER_ERROR,
-              message: e.toString()
+              message: errorString
             }),
           );
         }

@@ -7,7 +7,7 @@ import Admin from "@/components/admin";
 import Buzzer from "@/components/buzzer";
 import Login from "@/components/login";
 import Footer from "@/components/Login/footer"
-import cookieCutter from "cookie-cutter";
+import { setCookie, getCookie } from 'cookies-next';
 import { ERROR_CODES } from "i18n/errorCodes";
 import { Game } from "@/types/game";
 import { ErrorMessage, GetBackInMessage, GetBackInResponse, HostRoomResponse, JoinRoomResponse, QuitMessage, WebSocketAction, WebSocketMessage, WebSocketResponse } from "@/types/websocket";
@@ -17,11 +17,11 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [error, setErrorVal] = useState("");
-  const [registeredRoomCode, setRegisteredRoomCode] = useState(null);
+  const [registeredRoomCode, setRegisteredRoomCode] = useState<string | null>(null);
   const [host, setHost] = useState(false);
   const [game, setGame] = useState<Game | null>(null);
-  const [team, setTeam] = useState(null);
-  const [playerID, setPlayerID] = useState(null);
+  const [team, setTeam] = useState<number | null>(null);
+  const [playerID, setPlayerID] = useState<string | null>(null);
 
   const ws = useRef<WebSocket | null>(null);
 
@@ -51,7 +51,7 @@ export default function Home() {
    * tells client to clean up
    */
   function quitGame(host = false) {
-    ws.current.send(
+    ws.current?.send(
       JSON.stringify({
         action: "quit",
         host: host,
@@ -67,64 +67,67 @@ export default function Home() {
    * doesn't stay idleing while a player is sitting
    * on the main page
    */
-  function send(message) {
+  function send(message: string) {
     console.debug("send", ws);
     if (ws.current?.readyState !== 1 || !ws.current) {
       console.debug("connecting to server... new connection");
       fetch("/api/ws").then(() => {
         ws.current = new WebSocket(`wss://${window.location.host}/api/ws`);
-        ws.current.onopen = function() {
+        ws.current.onopen = function () {
           console.debug("game connected to server", ws.current);
 
-          ws.current.onmessage = function(evt) {
-            var received_msg = evt.data;
-            let json = JSON.parse(received_msg);
-            if (isResponseType<HostRoomResponse>(message, "host_room")) {
-              console.debug("registering room with host", json.room);
-              setPlayerID(json.id);
-              setHost(true);
-              setRegisteredRoomCode(json.room);
-              setGame(json.game);
-              cookieCutter.set("session", `${json.room}:${json.id}`);
-            } else if (isResponseType<JoinRoomResponse>(message, "join_room")) {
-              console.debug("Joining room : ", json);
-              setPlayerID(json.id);
-              setRegisteredRoomCode(json.room);
-              setGame(json.game);
-              if (json.team != null) {
-                setTeam(json.team);
-              }
-            } else if (isMessageType<QuitMessage>(message, "quit")) {
-              console.debug("player quit");
-              setPlayerID(null);
-              setRegisteredRoomCode(null);
-              cookieCutter.set("session", "");
-              setGame(null);
-              setHost(false);
-            } else if (isResponseType<GetBackInResponse>(message, "get_back_in")) {
-              console.debug("Getting back into room", json);
-              if (json.player === "host") {
+          if (ws.current) {
+            ws.current.onmessage = function (evt) {
+              const received_msg = evt.data;
+              const json = JSON.parse(received_msg);
+
+              if (isResponseType<HostRoomResponse>(json, "host_room")) {
+                console.debug("registering room with host", json.room);
+                setPlayerID(json.id);
                 setHost(true);
+                setRegisteredRoomCode(json.room);
+                setGame(json.game);
+                setCookie('session', `${json.room}:${json.id}`);
+              } else if (isResponseType<JoinRoomResponse>(json, "join_room")) {
+                console.debug("Joining room : ", json);
+                setPlayerID(json.id);
+                setRegisteredRoomCode(json.room);
+                setGame(json.game);
+                if (Number.isInteger(json.team) && json.team !== undefined) {
+                  setTeam(json.team);
+                }
+              } else if (isMessageType<QuitMessage>(json, "quit")) {
+                console.debug("player quit");
+                setPlayerID(null);
+                setRegisteredRoomCode(null);
+                setCookie("session", "");
+                setGame(null);
+                setHost(false);
+              } else if (isResponseType<GetBackInResponse>(json, "get_back_in")) {
+                console.debug("Getting back into room", json);
+                if (json.player === "host") {
+                  setHost(true);
+                }
+                if (Number.isInteger(json.team) && json.team !== undefined) {
+                  setTeam(json.team);
+                }
+                setPlayerID(json.id);
+                setRegisteredRoomCode(json.room);
+                setGame(json.game);
+              } else if (isMessageType<ErrorMessage>(json, "error")) {
+                console.error(json.code);
+                setError(t(json.code, { message: json.message }));
+              } else {
+                console.debug("did not expect in index.js: ", json);
               }
-              if (Number.isInteger(json.team)) {
-                setTeam(json.team);
-              }
-              setPlayerID(json.id);
-              setRegisteredRoomCode(json.room);
-              setGame(json.game);
-            } else if (isMessageType<ErrorMessage>(message, "error")) {
-              console.error(json.code);
-              setError(t(json.code, { message: json.message }));
-            } else {
-              console.debug("did not expect in index.js: ", json);
-            }
-          };
+            };
+            ws.current.onerror = function (e: Event) {
+              console.error(e);
+            };
 
-          ws.current.onerror = function(e: Event) {
-            console.error(e);
-          };
+          }
 
-          ws.current.send(message);
+          ws.current?.send(message);
         };
       });
     } else {
@@ -139,7 +142,7 @@ export default function Home() {
    * the game object
    */
   useEffect(() => {
-    let session = cookieCutter.get("session");
+    let session = getCookie("session");
     console.debug("user session", session);
     if (session != "" && session != null) {
       send(JSON.stringify({ action: "get_back_in", session: session }));
@@ -174,7 +177,7 @@ export default function Home() {
           })
         );
       } else {
-        setError(t(ERROR_CODES.MISSING_INPUT, {message: t("name")}));
+        setError(t(ERROR_CODES.MISSING_INPUT, { message: t("name") }));
       }
     } else {
       setError(t("room code is not correct length, should be 4 characters"));
@@ -238,7 +241,7 @@ export default function Home() {
   }
 
   if (typeof window !== "undefined") {
-    document.body.className= game?.settings?.theme + " bg-background";
+    document.body.className = game?.settings?.theme + " bg-background";
   }
   return (
     <>

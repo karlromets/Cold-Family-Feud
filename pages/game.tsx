@@ -6,7 +6,7 @@ import TeamName from "components/team-name.js";
 import QuestionBoard from "components/question-board.js";
 import Final from "components/final";
 import "tailwindcss/tailwind.css";
-import cookieCutter from "cookie-cutter";
+import { setCookie, getCookie } from 'cookies-next';
 import { ERROR_CODES } from "i18n/errorCodes";
 import type { Game } from "@/types/game";
 import type {
@@ -35,14 +35,14 @@ function isMessageType<T extends WebSocketMessage>(message: WebSocketMessage, ac
 
 let timerInterval: NodeJS.Timeout | null = null;
 
-export default function Game(props) {
+export default function GamePage() {
   const { i18n, t } = useTranslation();
   const [game, setGame] = useState<Game | null>(null);
   const [timer, setTimer] = useState(0);
   const [error, setErrorVal] = useState("");
   const [showMistake, setShowMistake] = useState(false);
   const [isHost, setIsHost] = useState(false);
-  const ws = useRef(null);
+  const ws = useRef<WebSocket | null>(null);
   let refreshCounter = 0;
 
   function setError(e: string) {
@@ -57,17 +57,17 @@ export default function Game(props) {
       ws.current = new WebSocket(`wss://${window.location.host}/api/ws`);
       ws.current.onopen = function () {
         console.log("game connected to server");
-        let session = cookieCutter.get("session");
+        let session = getCookie("session");
         console.debug(session);
         if (session != null) {
           console.debug("found user session", session);
-          ws.current.send(
+          ws.current?.send(
             JSON.stringify({ action: "game_window", session: session }),
           );
           setInterval(() => {
             console.debug("sending pong in game window");
             let [room, id] = session.split(":");
-            ws.current.send(
+            ws.current?.send(
               JSON.stringify({ action: "pong", id: id, room: room }),
             );
           }, 5000);
@@ -94,7 +94,7 @@ export default function Game(props) {
             })}`;
           }
           setGame(json.data);
-          const session = cookieCutter.get("session");
+          const session = getCookie("session") || "";
           const [_, id] = session.split(":");
           if (json.data?.registeredPlayers[id] === "host") {
             setIsHost(true);
@@ -140,7 +140,7 @@ export default function Game(props) {
 
                 // Send timer stop to admin.js
                 try {
-                  const session = cookieCutter.get("session");
+                  const session = getCookie("session") || "";
                   const [room, id] = session.split(":");
 
                   if (!session) {
@@ -153,7 +153,7 @@ export default function Game(props) {
                     return 0;
                   }
 
-                  ws.current.send(JSON.stringify({
+                  ws.current?.send(JSON.stringify({
                     action: "timer_complete",
                     room: room,
                     id: id
@@ -178,7 +178,7 @@ export default function Game(props) {
       };
 
       setInterval(() => {
-        if (ws.current.readyState !== 1) {
+        if (ws.current?.readyState !== 1) {
           setError(
             t(ERROR_CODES.CONNECTION_LOST, { message: `${10 - refreshCounter}` }),
           );
@@ -191,10 +191,12 @@ export default function Game(props) {
           setError("");
         }
       }, 1000);
+
+      
     });
   }, []);
 
-  if (game.teams != null) {
+  if (game?.teams != null) {
     let gameSession;
     if (game.title) {
       gameSession = <Title game={game} />;
@@ -229,7 +231,7 @@ export default function Game(props) {
             <button
               className="shadow-md rounded-lg m-1 p-2 bg-secondary-500 hover:bg-secondary-200 font-bold uppercase"
               onClick={() => {
-                cookieCutter.set("session", "");
+                setCookie("session", "");
                 window.location.href = "/";
               }}
             >

@@ -3,7 +3,7 @@ import TitleLogo from "./title-logo";
 import "tailwindcss/tailwind.css";
 import { useTranslation } from "react-i18next";
 import "../i18n/i18n";
-import cookieCutter from "cookie-cutter";
+import { setCookie, getCookie } from 'cookies-next';
 import Round from "./round";
 import QuestionBoard from "./question-board.js";
 import TeamName from "./team-name.js";
@@ -38,7 +38,7 @@ export default function Buzzer(props) {
   };
 
   useEffect(() => {
-    cookieCutter.set("session", `${props.room}:${props.id}:0`);
+    setCookie("session", `${props.room}:${props.id}:0`);
     setInterval(() => {
       if (ws.current.readyState !== 1) {
         setError(
