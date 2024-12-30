@@ -7,6 +7,7 @@ import QuestionBoard from "components/question-board.js";
 import Final from "components/final";
 import "tailwindcss/tailwind.css";
 import cookieCutter from "cookie-cutter";
+import BuzzerPopup from "components/BuzzerPopup";
 import { ERROR_CODES } from "i18n/errorCodes";
 
 let timerInterval = null;
@@ -18,6 +19,7 @@ export default function Game(props) {
   const [error, setErrorVal] = useState("");
   const [showMistake, setShowMistake] = useState(false);
   const [isHost, setIsHost] = useState(false);
+  const [buzzed, setBuzzed] = useState({});
   const ws = useRef(null);
   let refreshCounter = 0;
 
@@ -54,6 +56,17 @@ export default function Game(props) {
       let json = JSON.parse(received_msg);
       console.debug(json);
       if (json.action === "data") {
+          if(Object.keys(buzzed).length === 0 && json.data.buzzed.length > 0) {
+            let userId = json.data.buzzed[0].id
+            let user = json.data.registeredPlayers[userId]
+            setBuzzed({
+              id: userId,
+              name: user.name,
+              team: json.data.teams[user.team].name
+            })
+          } else if (Object.keys(buzzed).length > 0 && json.data.buzzed.length === 0) {
+            setBuzzed({});
+          }
         if (json.data.title_text === "Change Me") {
           json.data.title_text = t("Change Me");
         }
@@ -140,18 +153,19 @@ export default function Game(props) {
               return 0;
             }
           });
-        }, 1000);
-      } else if (json.action === "change_lang") {
-        console.debug("Language Change", json.data);
-        i18n.changeLanguage(json.data);
-      } else if (json.action === "timer_complete") {
-        console.debug("Timer complete");
-      } else if (json.action === "clearbuzzers") {
-        console.debug("Clear buzzers");
-      } else {
-        console.error("didn't expect", json);
-      }
-    };
+          }, 1000);
+        } else if (json.action === "change_lang") {
+          console.debug("Language Change", json.data);
+          i18n.changeLanguage(json.data);
+        } else if (json.action === "timer_complete") {
+          console.debug("Timer complete");
+        } else if (json.action === "clearbuzzers") {
+          console.debug("Clear buzzers");
+          setBuzzed({});
+        } else {
+          console.error("didn't expect", json);
+        }
+      };
 
     setInterval(() => {
       if (ws.current.readyState !== 1) {
@@ -226,6 +240,7 @@ export default function Game(props) {
             ) : null}
           </div>
         </div>
+        <BuzzerPopup buzzed={buzzed} />
       </>
     );
   } else {
