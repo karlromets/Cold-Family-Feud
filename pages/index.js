@@ -208,8 +208,8 @@ export default function Home() {
       );
     } else if (registeredRoomCode !== null && !host && game != null) {
       return (
-        <div className="flex w-full justify-center">
-          <div className="lg:w-1/2 sm:w-10/12 md:w-3/4 w-11/12 flex flex-col space-y-3 pt-5">
+        <div className="flex w-full h-full justify-center">
+          <div className="w-full flex flex-col items-center justify-center space-y-3">
             <Buzzer
               ws={ws}
               game={game}
