@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 func mergeGame(game *game, newData *game) {
@@ -37,17 +38,21 @@ func NewData(client *Client, event *Event) GameError {
 	if err != nil {
 		return GameError{code: SERVER_ERROR, message: fmt.Sprint(err)}
 	}
-	mergeGame(room.Game, &newData)
-	setTick(client, event)
 
-	if copyRound != newData.Round {
+	// If round is changing or title is being set to false (round starting)
+	if copyRound != newData.Round || (room.Game.Title && !newData.Title) {
 		room.Game.Buzzed = []buzzed{}
+		room.Game.RoundStartTime = time.Now().UTC()
 		message, err := NewSendClearBuzzers()
 		if err != nil {
 			return GameError{code: SERVER_ERROR, message: fmt.Sprint(err)}
 		}
 		room.Hub.broadcast <- message
 	}
+
+	mergeGame(room.Game, &newData)
+	setTick(client, event)
+
 	message, err := NewSendData(room.Game)
 	if err != nil {
 		return GameError{code: SERVER_ERROR, message: fmt.Sprint(err)}

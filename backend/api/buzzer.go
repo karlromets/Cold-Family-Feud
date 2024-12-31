@@ -76,31 +76,53 @@ func Buzz(client *Client, event *Event) GameError {
 	if !ok {
 		return GameError{code: PLAYER_NOT_FOUND}
 	}
-	latencyMilliseconds := time.Millisecond * time.Duration(player.Latency)
-	latencyTime := time.Now().UTC().Add(-latencyMilliseconds).UnixMilli()
+
+	// Calculate time since round start in milliseconds
+	currentTime := time.Now().UTC()
+	timeSinceStart := currentTime.Sub(room.Game.RoundStartTime).Milliseconds()
+	
+	// Account for player's latency
+	latencyMilliseconds := time.Duration(player.Latency) * time.Millisecond
+	buzzTime := timeSinceStart - latencyMilliseconds.Milliseconds()
+
+	// Ensure buzzTime is never negative
+	if buzzTime < 0 {
+		buzzTime = 0
+	}
+	
 	if len(room.Game.Buzzed) == 0 {
 		room.Game.Buzzed = append(room.Game.Buzzed, buzzed{
 			ID:   event.ID,
-			Time: latencyTime,
+			Time: buzzTime,
 		})
 	} else {
-		for idx, buz := range room.Game.Buzzed {
-			if buz.Time < latencyTime {
-				room.Game.Buzzed = append(room.Game.Buzzed, buzzed{
+		// Find the correct position to insert the new buzz
+		inserted := false
+		for i, buz := range room.Game.Buzzed {
+			if buzzTime < buz.Time {
+				// Insert before this buzz since we were faster
+				newBuzzed := make([]buzzed, 0, len(room.Game.Buzzed)+1)
+				newBuzzed = append(newBuzzed, room.Game.Buzzed[:i]...)
+				newBuzzed = append(newBuzzed, buzzed{
 					ID:   event.ID,
-					Time: latencyTime,
+					Time: buzzTime,
 				})
+				newBuzzed = append(newBuzzed, room.Game.Buzzed[i:]...)
+				room.Game.Buzzed = newBuzzed
+				inserted = true
 				break
 			}
-			// Prepend to buzzed list since this buzzed was faster
-			toAppend := []buzzed{{
+		}
+		
+		// If we haven't inserted yet, we were the slowest, so append
+		if !inserted {
+			room.Game.Buzzed = append(room.Game.Buzzed, buzzed{
 				ID:   event.ID,
-				Time: latencyTime,
-			}}
-			room.Game.Buzzed = append(toAppend, room.Game.Buzzed[idx+1:]...)
-			break
+				Time: buzzTime,
+			})
 		}
 	}
+
 	message, err := NewSendBuzzed()
 	if err != nil {
 		return GameError{code: SERVER_ERROR, message: fmt.Sprint(err)}

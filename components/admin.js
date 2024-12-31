@@ -1009,10 +1009,11 @@ export default function Admin(props) {
                               {t('number', { count: i + 1 })}. {game.registeredPlayers[x.id]?.name}
                             </p>
                             <p className="text-foreground" id={`playerBuzzed${i}TeamNameText`}>
-                              {t('team')}: {game.teams[game.registeredPlayers[x.id]?.team]?.name}
+                              {game.teams[game.registeredPlayers[x.id]?.team]?.name}
                             </p>
                             <p className="text-foreground" id={`playerBuzzer${i}BuzzerTimeText`}>
-                              {t('time')}: {(((x.time - game.tick) / 1000) % 60).toFixed(2)} {t('seconds')}
+                              {(x.time / 1000).toFixed(2)} {t('seconds')}
+                              {i > 0 && ` (+${((x.time - game.buzzed[0].time) / 1000).toFixed(2)} ${t('seconds')})`}
                             </p>
                           </div>
                         ))}
