@@ -109,3 +109,22 @@
        y="48.459953" />
   </g>
 </svg>
+<!-- 
+netsh advfirewall firewall add rule name="WSL2 HTTPS Out" dir=out action=allow protocol=TCP localport=443
+
+netsh advfirewall firewall add rule name="WSL2 HTTP Out" dir=out action=allow protocol=TCP localport=80
+
+netsh advfirewall firewall add rule name="WSL2 HTTPS" dir=in action=allow protocol=TCP localport=443 
+
+netsh advfirewall firewall add rule name="WSL2 HTTP" dir=in action=allow protocol=TCP localport=80 
+
+netsh interface portproxy add v4tov4 listenport=80 listenaddress=0.0.0.0 connectport=8080 connectaddress=192.168.40.32
+
+netsh interface portproxy add v4tov4 listenport=80 listenaddress=0.0.0.0 connectport=443 connectaddress=192.168.40.32
+
+netsh interface portproxy add v4tov4 listenport=80 listenaddress=0.0.0.0 connectport=80 connectaddress=192.168.40.32
+
+netsh interface portproxy add v4tov4 listenport=3000 listenaddress=0.0.0.0 connectport=3000 connectaddress=192.168.40.32
+
+netsh interface portproxy reset
+ -->
