@@ -127,6 +127,7 @@
   "Player Buzzer Sounds": "Player Buzzer Sounds",
   "Only play sound for the first player to buzz in": "Only play sound for the first player to buzz in",
   "First Press Only": "First Press Only",
+  "You have been blindfolded...": "You have been blindfolded...",
   "errors": {
     "room_not_found": "Room not found",
     "host_quit": "Host quit the game",
